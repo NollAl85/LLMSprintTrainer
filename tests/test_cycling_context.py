@@ -18,6 +18,9 @@ ACTIVITIES = [
         "power_15s": 780,
         "power_30s": 650,
         "power_60s": 520,
+        "ss_cp": 50.51385,
+        "ss_p_max": 11.039366,
+        "ss_w_prime": 3.0405822,
     },
     {
         "id": "a2",
@@ -52,6 +55,9 @@ def test_cycling_context_computes_basic_weekly_load_and_duration() -> None:
     assert context["total_training_load"] == 160
     assert context["load_per_week"] == {"2026-W01": 70.0, "2026-W02": 90.0}
     assert context["sprint_power"]["max_5s_power"]["watts"] == 900
+    assert context["ss_power_model"]["latest"]["ss_cp"] == 50.51
+    assert context["ss_power_model"]["latest"]["ss_p_max"] == 11.04
+    assert context["ss_power_model"]["latest"]["ss_w_prime"] == 3.04
     assert context["wellness_summary"]["latest"]["ctl"] == 60
 
 
@@ -62,3 +68,5 @@ def test_missing_sprint_power_metrics_are_handled_gracefully() -> None:
 
     assert context["sprint_power"]["max_5s_power"] is None
     assert "max_5s_power" in context["missing_metrics"]
+    assert context["ss_power_model"]["latest"] is None
+    assert "ss_cp" in context["missing_metrics"]

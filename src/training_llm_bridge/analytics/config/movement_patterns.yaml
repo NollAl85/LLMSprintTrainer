@@ -1,0 +1,48 @@
+squat_pattern:
+  - "back squat"
+  - "front squat"
+  - "goblet squat"
+  - "squat"
+  - "leg press"
+hinge_pattern:
+  - "deadlift"
+  - "romanian deadlift"
+  - "rdl"
+  - "good morning"
+  - "hip thrust"
+unilateral_leg:
+  - "bulgarian split squat"
+  - "split squat"
+  - "lunge"
+  - "step up"
+hamstring_eccentric:
+  - "nordic"
+  - "leg curl"
+  - "hamstring curl"
+calf_ankle:
+  - "calf"
+  - "ankle"
+upper_push:
+  - "bench press"
+  - "push up"
+  - "shoulder press"
+  - "overhead press"
+  - "fly"
+  - "dip"
+upper_pull:
+  - "row"
+  - "pull up"
+  - "chin up"
+  - "pulldown"
+  - "curl"
+  - "pullover"
+trunk_core:
+  - "plank"
+  - "crunch"
+  - "sit up"
+  - "dead bug"
+  - "pallof"
+  - "dragonfly"
+other:
+  - "mobility"
+  - "stretch"

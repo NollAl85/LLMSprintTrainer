@@ -18,6 +18,7 @@ CYCLING_TYPES = {
 }
 
 SPRINT_DURATIONS = (5, 10, 15, 30, 60)
+SS_POWER_MODEL_KEYS = ("ss_cp", "ss_p_max", "ss_w_prime")
 
 
 def build_cycling_context(
@@ -42,6 +43,8 @@ def build_cycling_context(
     total_load = _sum_available(activity.get("training_load") for activity in rides)
     weekly = _weekly_rollups(rides)
     sprint_metrics, missing_metrics = _sprint_power_metrics(rides)
+    ss_power_model, ss_missing_metrics = _ss_power_model_summary(rides)
+    missing_metrics.extend(ss_missing_metrics)
     wellness_summary = _wellness_summary(wellness)
     sprint_events = _sprint_events(events)
     flags = _cycling_flags(rides, weekly, sprint_metrics, wellness_summary, sprint_events)
@@ -65,11 +68,12 @@ def build_cycling_context(
         recent_load_ramp=_recent_load_ramp(weekly),
         recent_rest_days=_recent_rest_days(rides, end_dt),
         sprint_power=sprint_metrics,
+        ss_power_model=ss_power_model,
         best_recent_efforts_by_duration=_best_recent_efforts_by_duration(rides),
         wellness_summary=wellness_summary,
         planned_sprint_sessions=sprint_events,
         flags=flags,
-        missing_metrics=missing_metrics,
+        missing_metrics=sorted(set(missing_metrics)),
         metadata={
             "source": "intervals_icu",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -108,6 +112,7 @@ def _normalize_activity(activity: dict) -> dict:
         "work_kj": work_kj,
         "training_load": _first_number(activity, ["icu_training_load", "training_load"]),
         "intensity": _first_number(activity, ["icu_intensity", "intensity", "intensity_factor"]),
+        "ss_power_model": _extract_ss_power_model(activity),
     }
 
 
@@ -155,6 +160,41 @@ def _sprint_power_metrics(activities: list[dict]) -> tuple[dict[str, Any], list[
             missing.append(key)
     metrics["trend"] = _sprint_power_trend(activities)
     return metrics, missing
+
+
+def _extract_ss_power_model(activity: dict) -> dict[str, float | None]:
+    return {key: _num(activity.get(key)) for key in SS_POWER_MODEL_KEYS}
+
+
+def _ss_power_model_summary(activities: list[dict]) -> tuple[dict[str, Any], list[str]]:
+    records = []
+    for activity in activities:
+        values = activity.get("ss_power_model") or _extract_ss_power_model(activity)
+        if not any(value is not None for value in values.values()):
+            continue
+        records.append(
+            {
+                "activity_id": activity.get("id"),
+                "date": activity.get("date"),
+                "name": activity.get("name"),
+                **{key: _round(value) for key, value in values.items()},
+            }
+        )
+
+    missing = [
+        key
+        for key in SS_POWER_MODEL_KEYS
+        if not any(record.get(key) is not None for record in records)
+    ]
+    return (
+        {
+            "basis": "from Intervals.icu activity fields ss_cp, ss_p_max, ss_w_prime",
+            "latest": records[-1] if records else None,
+            "records": records,
+            "missing_metrics": missing,
+        },
+        missing,
+    )
 
 
 def _power_for_duration(activity: dict, duration: int) -> float | None:

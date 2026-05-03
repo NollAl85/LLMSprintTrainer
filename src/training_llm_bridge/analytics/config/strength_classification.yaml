@@ -1,0 +1,10 @@
+# Practical heuristics, not validated physiology.
+max_strength_max_reps: 5
+max_strength_min_heavy_sets: 2
+hypertrophy_min_reps: 6
+hypertrophy_max_reps: 15
+hypertrophy_min_sets: 6
+power_explosive_max_reps: 3
+accessory_max_weight_kg: 30
+lower_body_set_share: 0.50
+upper_body_set_share: 0.50

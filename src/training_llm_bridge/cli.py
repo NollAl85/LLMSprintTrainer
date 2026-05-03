@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from training_llm_bridge.analytics import POWER_DURATIONS_SEC
+from training_llm_bridge.analytics.cycling_efforts import (
+    build_power_baselines,
+    classify_cycling_activity,
+)
+from training_llm_bridge.analytics.exposure_calendar import build_daily_exposure_calendar
+from training_llm_bridge.analytics.strength_classification import classify_strength_workout
 from training_llm_bridge.coach.sprint_constraints import get_sprint_kilo_constraints
 from training_llm_bridge.config import load_settings
 from training_llm_bridge.contexts.combined_context import build_combined_training_context
@@ -44,6 +52,14 @@ def main(argv: list[str] | None = None) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="training-bridge")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    analytics = subparsers.add_parser("analytics", help="Build transparent analytics outputs.")
+    analytics_sub = analytics.add_subparsers(dest="analytics_command", required=True)
+    analytics_calendar = analytics_sub.add_parser("calendar", help="Build daily exposure calendar.")
+    analytics_calendar.add_argument("--weeks", type=int, default=12)
+    analytics_calendar.add_argument("--out-json", type=Path)
+    analytics_calendar.add_argument("--out-csv", type=Path)
+    analytics_calendar.set_defaults(func=_cmd_analytics_calendar)
 
     recent = subparsers.add_parser("recent", help="Show recent Hevy workouts.")
     recent.add_argument("--weeks", type=int, default=8)
@@ -114,6 +130,80 @@ def _cmd_recent(args: argparse.Namespace) -> dict:
     with _hevy_client(require_api_key=True) as client:
         workouts = _get_recent_workouts(client, weeks=args.weeks)
     return {"weeks": args.weeks, "workouts": workouts}
+
+
+def _cmd_analytics_calendar(args: argparse.Namespace) -> dict:
+    settings = load_settings(require_api_key=False)
+    start, end = _date_range_for_weeks(args.weeks)
+    baseline_start, _baseline_end = _date_range_for_days(90)
+
+    workouts: list[dict] = []
+    activities_for_calendar: list[dict] = []
+    activities_for_baselines: list[dict] = []
+    wellness: list[dict] = []
+    missing_sources = []
+
+    if settings.hevy_api_key:
+        with HevyClient(settings=settings) as hevy:
+            workouts = _get_recent_workouts(hevy, weeks=args.weeks)
+    else:
+        missing_sources.append("hevy")
+        print("Analytics calendar: HEVY_API_KEY not configured; building without strength data.", file=sys.stderr)
+
+    if settings.intervals_configured:
+        with IntervalsClient(settings=settings) as intervals:
+            activities_for_baselines = _intervals_activities_with_streams(
+                intervals, start=baseline_start, end=end
+            )
+            activities_for_calendar = [
+                activity
+                for activity in activities_for_baselines
+                if _date_in_range(_activity_date_string(activity), start, end)
+            ]
+            wellness = intervals.list_wellness(start_date=start, end_date=end)
+    else:
+        missing_sources.append("intervals")
+        print(
+            "Analytics calendar: INTERVALS_API_KEY/INTERVALS_ATHLETE_ID not configured; "
+            "building without cycling data.",
+            file=sys.stderr,
+        )
+
+    baselines = build_power_baselines(activities_for_baselines, lookback_days=90)
+    classified_cycling = [
+        classify_cycling_activity(activity, baselines=baselines)
+        for activity in activities_for_calendar
+        if "Ride" in str(activity.get("type", "")) and "_note" not in activity
+    ]
+    classified_strength = [classify_strength_workout(workout) for workout in workouts]
+    calendar = build_daily_exposure_calendar(
+        classified_cycling=classified_cycling,
+        classified_strength=classified_strength,
+        baselines=baselines,
+        wellness=wellness,
+    )
+
+    result = {
+        "calendar": calendar,
+        "metadata": {
+            "weeks": args.weeks,
+            "start": start,
+            "end": end,
+            "missing_sources": missing_sources,
+            "notes": [
+                "Analytics v1 is data-first and does not compute combined readiness or interference scores.",
+                "Rows are emitted only for dates present in cycling, strength, or wellness inputs.",
+            ],
+        },
+    }
+
+    if args.out_json:
+        _emit_json(result, out=args.out_json)
+    if args.out_csv:
+        _write_calendar_csv(calendar, args.out_csv)
+    if not args.out_json:
+        return result
+    return None
 
 
 def _cmd_lifting_context(args: argparse.Namespace) -> dict:
@@ -241,6 +331,78 @@ def _date_range_for_weeks(weeks: int) -> tuple[str, str]:
     end = datetime.now(timezone.utc).date()
     start = end - timedelta(weeks=weeks)
     return start.isoformat(), end.isoformat()
+
+
+def _date_range_for_days(days: int) -> tuple[str, str]:
+    end = datetime.now(timezone.utc).date()
+    start = end - timedelta(days=days)
+    return start.isoformat(), end.isoformat()
+
+
+def _intervals_activities_with_streams(
+    client: IntervalsClient, *, start: str, end: str
+) -> list[dict]:
+    activities = client.list_activities(start_date=start, end_date=end)
+    enriched = []
+    seen = set()
+    for activity in activities:
+        activity_id = activity.get("id")
+        if activity_id and activity_id in seen:
+            continue
+        if activity_id:
+            seen.add(activity_id)
+        if "_note" in activity or "Ride" not in str(activity.get("type", "")):
+            enriched.append(activity)
+            continue
+        stream_types = set(activity.get("stream_types") or [])
+        if {"watts", "cadence"} & stream_types:
+            try:
+                activity = {
+                    **activity,
+                    "streams": client.get_activity_streams(
+                        str(activity_id), stream_types=["time", "watts", "cadence"]
+                    ),
+                }
+            except TrainingBridgeError:
+                activity = {**activity, "streams": None}
+        enriched.append(activity)
+    return enriched
+
+
+def _activity_date_string(activity: dict) -> str | None:
+    value = activity.get("start_date_local") or activity.get("start_date") or activity.get("date")
+    if not value:
+        return None
+    return str(value)[:10]
+
+
+def _date_in_range(value: str | None, start: str, end: str) -> bool:
+    if not value:
+        return False
+    return start <= value <= end
+
+
+def _write_calendar_csv(calendar: list[dict], path: Path) -> None:
+    flattened = [_flatten(row) for row in calendar]
+    fieldnames = sorted({key for row in flattened for key in row})
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(flattened)
+
+
+def _flatten(value: Any, prefix: str = "") -> dict[str, Any]:
+    if isinstance(value, dict):
+        output: dict[str, Any] = {}
+        for key, nested in value.items():
+            nested_prefix = f"{prefix}.{key}" if prefix else str(key)
+            output.update(_flatten(nested, nested_prefix))
+        return output
+    if isinstance(value, list):
+        if all(not isinstance(item, (dict, list)) for item in value):
+            return {prefix: ";".join("" if item is None else str(item) for item in value)}
+        return {prefix: json.dumps(value, sort_keys=True, default=str)}
+    return {prefix: value}
 
 
 def _read_json(path: Path) -> dict:

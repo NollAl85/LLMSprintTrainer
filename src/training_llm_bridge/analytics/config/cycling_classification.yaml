@@ -1,0 +1,13 @@
+# Practical heuristics, not validated physiology.
+near_max_threshold: 0.95
+pmax_sprint_min_efforts_1_20s: 1
+pmax_frc_min_efforts_30_60s: 1
+frc_anaerobic_min_efforts_30_180s: 2
+severe_vo2_min_efforts_180_300s: 1
+recovery_max_intensity: 0.60
+recovery_max_load: 35
+recovery_max_duration_sec: 5400
+z2_min_duration_sec: 1800
+z2_max_intensity: 0.75
+mixed_hard_min_load: 70
+mixed_hard_min_intensity: 0.85

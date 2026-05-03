@@ -209,6 +209,79 @@ Create a low-volume heavy lower-body routine that maintains strength but minimiz
 
 Review my 15s/30s/60s power trends and compare them with lower-body lifting volume. Distinguish productive overload from accumulating fatigue.
 
+## Analytics (v1)
+
+Analytics v1 is data-first. It builds a daily exposure calendar from inspected Hevy and Intervals.icu inputs, but it does not invent a combined readiness score, leg-load score, or interference flag. The goal is to make raw exposures inspectable before adding higher-level interpretation.
+
+All classifications are heuristic and labelled. Each classified cycling activity and strength workout includes `heuristic: true`, a `basis` string, evidence fields, and `missing_metrics` when required data is unavailable. Thresholds and movement mappings are editable rather than hidden in call sites.
+
+Intervals.icu SS Fitness-view metrics are preserved when present as raw activity fields: `ss_cp`, `ss_p_max`, and `ss_w_prime`. The bridge does not convert or rename their units because the API response does not label them.
+
+Run:
+
+```sh
+uv run training-bridge analytics calendar --weeks 12 \
+  --out-json exposure_calendar.json \
+  --out-csv exposure_calendar.csv
+```
+
+If only one source is configured, the command builds a one-sided calendar and prints a stderr banner naming the missing source.
+
+Example calendar rows:
+
+```json
+[
+  {
+    "date": "2026-01-01",
+    "cycling": {
+      "activity_count": 1,
+      "primary_tags": ["pmax_sprint"],
+      "ss_power_model": {
+        "latest": { "ss_cp": 50.51, "ss_p_max": 11.04, "ss_w_prime": 3.04 }
+      }
+    },
+    "strength": { "workout_count": 1, "primary_session_tags": ["max_strength"] },
+    "missing_metrics": ["rpe"]
+  },
+  {
+    "date": "2026-01-02",
+    "cycling": { "activity_count": 0 },
+    "strength": { "workout_count": 0 },
+    "wellness": { "ctl": 50, "atl": 47 }
+  },
+  {
+    "date": "2026-01-03",
+    "cycling": { "activity_count": 1, "primary_tags": ["recovery_easy"] },
+    "strength": { "workout_count": 0 }
+  }
+]
+```
+
+Override editable analytics config by creating files with the same names in another directory and setting:
+
+```sh
+TRAINING_BRIDGE_ANALYTICS_CONFIG_DIR=/path/to/analytics-config
+```
+
+Files that can be shadowed:
+
+- `movement_patterns.yaml`
+- `cycling_classification.yaml`
+- `strength_classification.yaml`
+
+Known v1 limitations:
+
+- No standalone sprint-quality panel.
+- No energy-system exposure panel.
+- No interference flags.
+- No HTML report.
+- No MCP analytics tools.
+- No combined analytics context.
+- Rows are emitted only for dates present in cycling, strength, or wellness inputs; empty-day gap filling is intentionally minimal.
+- Power baselines need roughly 90 days of useful power data to become meaningful.
+
+Roadmap pointer: v2 should add sprint-quality panels, energy-system exposure panels, transparent interference flags, and richer reports without hiding the raw daily exposure table.
+
 ## Roadmap
 
 - v1.2: weekly combined review workflow.
