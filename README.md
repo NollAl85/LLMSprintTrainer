@@ -217,6 +217,8 @@ All classifications are heuristic and labelled. Each classified cycling activity
 
 Intervals.icu SS Fitness-view metrics are preserved when present as raw activity fields: `ss_cp`, `ss_p_max`, and `ss_w_prime`. The bridge does not convert or rename their units because the API response does not label them.
 
+Strength analytics include a `leg_stress` summary split into `quads` and `posterior_chain`. This is based on movement-pattern set counts and tracked load, not a validated fatigue score. Reverse Nordic curls are treated as quad/knee-dominant work.
+
 Run:
 
 ```sh
@@ -226,6 +228,8 @@ uv run training-bridge analytics calendar --weeks 12 \
 ```
 
 If only one source is configured, the command builds a one-sided calendar and prints a stderr banner naming the missing source.
+
+The JSON output includes a `weekly_summary` block with cycling totals, strength totals, and raw weekly sums for `ss_cp`, `ss_p_max`, and `ss_w_prime`.
 
 Example calendar rows:
 
@@ -266,6 +270,7 @@ TRAINING_BRIDGE_ANALYTICS_CONFIG_DIR=/path/to/analytics-config
 Files that can be shadowed:
 
 - `movement_patterns.yaml`
+- `leg_stress_patterns.yaml`
 - `cycling_classification.yaml`
 - `strength_classification.yaml`
 

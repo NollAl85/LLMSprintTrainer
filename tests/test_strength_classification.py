@@ -43,6 +43,9 @@ def test_lower_body_hypertrophy_session() -> None:
     assert "hypertrophy" in result["session_tags"]
     assert "lower_body" in result["session_tags"]
     assert result["movement_patterns"]["unilateral_leg"]["sets"] == 3
+    assert result["leg_stress"]["quads"]["sets"] == 6
+    assert result["leg_stress"]["quads"]["stress"] == "moderate"
+    assert result["leg_stress"]["posterior_chain"]["sets"] == 0
 
 
 def test_upper_only_session() -> None:
@@ -75,3 +78,20 @@ def test_unknown_exercise_produces_uncertainty() -> None:
 
     assert result["movement_patterns"]["unknown"]["sets"] == 1
     assert any("Mystery Drill" in item for item in result["uncertainty"])
+
+
+def test_reverse_nordic_is_quad_stress_not_hamstring() -> None:
+    workout = {
+        "id": "w5",
+        "title": "Reverse nordics",
+        "start_time": "2026-01-05T10:00:00Z",
+        "exercises": [{"title": "Reverse Nordic Curl", "sets": [{"weight_kg": -35, "reps": 7}] * 3}],
+    }
+
+    result = classify_strength_workout(workout)
+
+    assert result["movement_patterns"]["squat_pattern"]["sets"] == 3
+    assert result["movement_patterns"]["hamstring_eccentric"]["sets"] == 0
+    assert result["leg_stress"]["quads"]["sets"] == 3
+    assert result["leg_stress"]["quads"]["stress"] == "low"
+    assert result["leg_stress"]["posterior_chain"]["sets"] == 0

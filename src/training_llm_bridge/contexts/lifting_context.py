@@ -69,6 +69,7 @@ def build_lifting_context(workouts: list[dict]) -> dict:
         workout_volume = 0.0
         workout_exercises: list[str] = []
         lower_body_sets = 0
+        workout_rpe_values: list[float] = []
 
         for exercise in workout["exercises"]:
             title = exercise["title"]
@@ -80,6 +81,9 @@ def build_lifting_context(workouts: list[dict]) -> dict:
                 exposure_dates[title].append(workout["start_dt"])
 
             for set_item in exercise["sets"]:
+                rpe = _as_float(set_item.get("rpe"))
+                if rpe is not None:
+                    workout_rpe_values.append(rpe)
                 total_sets += 1
                 workout_sets += 1
                 sets_per_exercise[title] += 1
@@ -126,6 +130,8 @@ def build_lifting_context(workouts: list[dict]) -> dict:
                     "date": _date_string(workout["start_dt"]),
                     "title": workout["title"],
                     "lower_body_sets": lower_body_sets,
+                    "set_rpe_mean": _round(_avg(workout_rpe_values)),
+                    "set_rpe_count": len(workout_rpe_values),
                     "interference_note": (
                         "Heuristic: lower-body lifting may affect sprint quality if placed "
                         "within 24-48h before key sprint work."
@@ -140,6 +146,7 @@ def build_lifting_context(workouts: list[dict]) -> dict:
                 "start_time": workout["start_time"],
                 "total_sets": workout_sets,
                 "total_volume_kg": _round(workout_volume),
+                "set_rpe_mean": _round(_avg(workout_rpe_values)),
                 "exercises": sorted(set(workout_exercises)),
             }
         )
@@ -262,6 +269,12 @@ def _round(value: float | None) -> float | None:
     return round(value, 2)
 
 
+def _avg(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
 def _compact_top_sets(top_sets: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
     compact: dict[str, list[dict[str, Any]]] = {}
     for title, sets in top_sets.items():
@@ -293,7 +306,6 @@ def _recent_progression(dated_performances: dict[str, list[dict[str, Any]]]) -> 
             "early_best_estimated_1rm_kg": _round(early_best),
             "recent_best_estimated_1rm_kg": _round(recent_best),
             "delta_kg": _round(delta),
-            "direction": "up" if delta > 1 else "down" if delta < -1 else "flat",
         }
     return dict(sorted(progression.items()))
 

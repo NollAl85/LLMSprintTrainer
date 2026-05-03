@@ -48,6 +48,12 @@ def build_cycling_context(
     wellness_summary = _wellness_summary(wellness)
     sprint_events = _sprint_events(events)
     flags = _cycling_flags(rides, weekly, sprint_metrics, wellness_summary, sprint_events)
+    missing_metrics.extend(
+        "intervals_subjective"
+        for activity in rides
+        if activity.get("subjective_rating") is None
+    )
+    co_occurrences = _co_occurrences(flags)
 
     context = CyclingContext(
         integrated=True,
@@ -73,6 +79,7 @@ def build_cycling_context(
         wellness_summary=wellness_summary,
         planned_sprint_sessions=sprint_events,
         flags=flags,
+        co_occurrences=co_occurrences,
         missing_metrics=sorted(set(missing_metrics)),
         metadata={
             "source": "intervals_icu",
@@ -113,6 +120,7 @@ def _normalize_activity(activity: dict) -> dict:
         "training_load": _first_number(activity, ["icu_training_load", "training_load"]),
         "intensity": _first_number(activity, ["icu_intensity", "intensity", "intensity_factor"]),
         "ss_power_model": _extract_ss_power_model(activity),
+        "subjective_rating": _cycling_subjective_rating(activity),
     }
 
 
@@ -158,7 +166,7 @@ def _sprint_power_metrics(activities: list[dict]) -> tuple[dict[str, Any], list[
         else:
             metrics[key] = None
             missing.append(key)
-    metrics["trend"] = _sprint_power_trend(activities)
+    metrics["series"] = _sprint_power_series(activities)
     return metrics, missing
 
 
@@ -197,6 +205,38 @@ def _ss_power_model_summary(activities: list[dict]) -> tuple[dict[str, Any], lis
     )
 
 
+def _cycling_subjective_rating(activity: dict) -> dict[str, Any] | None:
+    rpe = None
+    rpe_source = None
+    for key in ("perceived_exertion", "rpe"):
+        value = _num(activity.get(key))
+        if value is not None:
+            rpe = value
+            rpe_source = f"intervals.{key}"
+            break
+    feel = _num(activity.get("feel"))
+    if rpe is None and feel is None:
+        return None
+    return {
+        "rpe": {"source": rpe_source, "value": _round(rpe)} if rpe is not None else None,
+        "feel": {"source": "intervals.feel", "value": _round(feel)} if feel is not None else None,
+    }
+
+
+def _cycling_flag_subjective_rating(activity: dict) -> dict[str, Any]:
+    return {"cycling_session": activity.get("subjective_rating")}
+
+
+def _cycling_session_evidence(activity: dict) -> dict[str, Any]:
+    return {
+        "activity_id": activity.get("id"),
+        "date": activity.get("date"),
+        "intensity": _round(_num(activity.get("intensity"))),
+        "name": activity.get("name"),
+        "training_load": _round(_num(activity.get("training_load"))),
+    }
+
+
 def _power_for_duration(activity: dict, duration: int) -> float | None:
     candidate_keys = [
         f"power_{duration}s",
@@ -227,29 +267,20 @@ def _power_for_duration(activity: dict, duration: int) -> float | None:
     return None
 
 
-def _sprint_power_trend(activities: list[dict]) -> dict[str, Any]:
-    trends: dict[str, Any] = {}
+def _sprint_power_series(activities: list[dict]) -> dict[str, list[dict[str, Any]]]:
+    series: dict[str, list[dict[str, Any]]] = {}
     for duration in (15, 30, 60):
         dated = [
-            (activity.get("start_dt"), _power_for_duration(activity, duration))
+            {
+                "activity_id": activity.get("id"),
+                "date": activity.get("date"),
+                "watts": int(round(_power_for_duration(activity, duration) or 0)),
+            }
             for activity in activities
             if activity.get("start_dt") and _power_for_duration(activity, duration) is not None
         ]
-        dated.sort(key=lambda item: item[0])
-        if len(dated) < 3:
-            trends[f"{duration}s"] = None
-            continue
-        split = max(len(dated) // 2, 1)
-        early_best = max(value for _dt, value in dated[:split] if value is not None)
-        recent_best = max(value for _dt, value in dated[split:] if value is not None)
-        delta = recent_best - early_best
-        trends[f"{duration}s"] = {
-            "early_best_watts": _round(early_best),
-            "recent_best_watts": _round(recent_best),
-            "delta_watts": _round(delta),
-            "direction": "up" if delta > 0 else "down" if delta < 0 else "flat",
-        }
-    return trends
+        series[f"{duration}s"] = sorted(dated, key=lambda item: str(item.get("date") or ""))
+    return series
 
 
 def _best_recent_efforts_by_duration(activities: list[dict]) -> dict[str, Any]:
@@ -341,30 +372,22 @@ def _cycling_flags(
     sprint_events: list[dict],
 ) -> list[dict[str, Any]]:
     flags: list[dict[str, Any]] = []
-    ramp = _recent_load_ramp(weekly)
-    if ramp and ramp.get("ratio") and ramp["ratio"] >= 1.5:
-        flags.append({"type": "high_recent_load", "severity": "medium", "details": ramp})
-
     hard_days = [
         activity
         for activity in activities
         if (_num(activity.get("training_load")) or 0) >= 75 or (_num(activity.get("intensity")) or 0) >= 0.9
     ]
+    hard_days.sort(key=lambda item: item.get("start_dt") or datetime.min.replace(tzinfo=timezone.utc))
     if _has_hard_days_close_together(hard_days):
+        latest_hard_day = hard_days[-1]
         flags.append(
             {
+                "basis": "cycling activities with high load or intensity within 48h",
+                "cycling_session": _cycling_session_evidence(latest_hard_day),
+                "heuristic": True,
                 "type": "too_many_hard_days_close_together",
-                "severity": "medium",
                 "note": "Two or more hard cycling days are within 48h.",
-            }
-        )
-
-    if _has_declining_sprint_power(sprint_metrics):
-        flags.append(
-            {
-                "type": "sprint_power_declining",
-                "severity": "medium",
-                "note": "Recent sprint-duration bests are below earlier bests in this window.",
+                "subjective_rating": _cycling_flag_subjective_rating(latest_hard_day),
             }
         )
 
@@ -376,20 +399,26 @@ def _cycling_flags(
         if ctl is not None and atl is not None and atl - ctl > 10:
             flags.append(
                 {
+                    "basis": "latest wellness ATL minus CTL",
+                    "heuristic": True,
                     "type": "poor_freshness_before_sprint_work",
-                    "severity": "medium",
                     "note": "Latest ATL is more than 10 above CTL.",
                     "ctl": ctl,
                     "atl": atl,
+                    "date": str(latest.get("id")) if latest.get("id") else None,
+                    "subjective_rating": {"cycling_session": None},
                 }
             )
         if fatigue is not None and fatigue >= 4:
             flags.append(
                 {
+                    "basis": "latest wellness fatigue",
+                    "heuristic": True,
                     "type": "poor_freshness_before_sprint_work",
-                    "severity": "medium",
                     "note": "Latest wellness fatigue is high.",
                     "fatigue": fatigue,
+                    "date": str(latest.get("id")) if latest.get("id") else None,
+                    "subjective_rating": {"cycling_session": None},
                 }
             )
 
@@ -400,9 +429,11 @@ def _cycling_flags(
             if event_date and (event_date - timedelta(days=1)).isoformat() not in rest_days:
                 flags.append(
                     {
+                        "basis": "planned sprint event without obvious previous-day recovery",
+                        "heuristic": True,
                         "type": "insufficient_recovery_before_planned_sprint_day",
-                        "severity": "medium",
                         "event": event,
+                        "subjective_rating": {"cycling_session": None},
                     }
                 )
     return flags
@@ -465,11 +496,57 @@ def _has_hard_days_close_together(activities: list[dict]) -> bool:
     return any((later - earlier).total_seconds() <= 48 * 3600 for earlier, later in zip(dates, dates[1:]))
 
 
-def _has_declining_sprint_power(sprint_metrics: dict[str, Any]) -> bool:
-    trend = sprint_metrics.get("trend")
-    if not isinstance(trend, dict):
-        return False
-    return any(isinstance(item, dict) and item.get("direction") == "down" for item in trend.values())
+def _co_occurrences(flags: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for flag in flags:
+        week = _flag_iso_week(flag)
+        if week:
+            grouped[week].append(flag)
+
+    output = []
+    for week, week_flags in grouped.items():
+        flag_types = sorted({str(flag.get("type")) for flag in week_flags if flag.get("type")})
+        if len(flag_types) < 2:
+            continue
+        evidence: dict[str, Any] = {}
+        for flag in week_flags:
+            _merge_evidence(evidence, _flag_evidence(flag))
+        output.append({"iso_week": week, "flag_types": flag_types, "evidence": evidence})
+    return sorted(output, key=lambda item: item["iso_week"])
+
+
+def _flag_iso_week(flag: dict[str, Any]) -> str | None:
+    for path in (
+        ("lifting_session", "date"),
+        ("cycling_session", "date"),
+        ("event", "date"),
+        ("sprint_event", "date"),
+    ):
+        value = flag.get(path[0])
+        if isinstance(value, dict):
+            parsed = _parse_date(value.get(path[1]))
+            if parsed:
+                return _iso_week_from_date(parsed)
+    if flag.get("week"):
+        return str(flag["week"])
+    parsed = _parse_date(flag.get("date"))
+    return _iso_week_from_date(parsed) if parsed else None
+
+
+def _flag_evidence(flag: dict[str, Any]) -> dict[str, Any]:
+    excluded = {"basis", "heuristic", "note", "subjective_rating", "type"}
+    return {key: value for key, value in flag.items() if key not in excluded}
+
+
+def _merge_evidence(target: dict[str, Any], incoming: dict[str, Any]) -> None:
+    for key, value in incoming.items():
+        if key not in target:
+            target[key] = value
+        elif target[key] != value:
+            existing = target[key] if isinstance(target[key], list) else [target[key]]
+            if value not in existing:
+                existing.append(value)
+            target[key] = existing
 
 
 def _parse_datetime(value: Any) -> datetime | None:
@@ -507,6 +584,11 @@ def _date_string(value: datetime | None) -> str | None:
 
 
 def _iso_week(value: datetime) -> str:
+    year, week, _weekday = value.isocalendar()
+    return f"{year}-W{week:02d}"
+
+
+def _iso_week_from_date(value: date) -> str:
     year, week, _weekday = value.isocalendar()
     return f"{year}-W{week:02d}"
 

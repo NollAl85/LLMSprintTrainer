@@ -242,6 +242,7 @@ def classify_cycling_activity(
             "intensity": _normalized_intensity(activity),
             "interval_summary": activity.get("interval_summary"),
             "name": activity.get("name"),
+            "start_time": activity.get("start_date_local") or activity.get("start_date"),
             "training_load": _first_number(activity, ["icu_training_load", "training_load", "power_load"]),
         },
         "heuristic": True,

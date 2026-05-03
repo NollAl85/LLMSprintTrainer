@@ -1,0 +1,6 @@
+quads:
+  - "squat_pattern"
+  - "unilateral_leg"
+posterior_chain:
+  - "hinge_pattern"
+  - "hamstring_eccentric"

@@ -8,3 +8,6 @@ power_explosive_max_reps: 3
 accessory_max_weight_kg: 30
 lower_body_set_share: 0.50
 upper_body_set_share: 0.50
+leg_stress_low_sets: 1
+leg_stress_moderate_sets: 4
+leg_stress_high_sets: 8

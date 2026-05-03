@@ -3,6 +3,8 @@ from __future__ import annotations
 from training_llm_bridge.analytics.cycling_efforts import classify_cycling_activity
 from training_llm_bridge.analytics.exposure_calendar import build_daily_exposure_calendar
 from training_llm_bridge.analytics.strength_classification import classify_strength_workout
+from training_llm_bridge.contexts.combined_context import build_combined_training_context
+from training_llm_bridge.contexts.cycling_context import build_cycling_context
 
 
 def test_schema_lock_for_analytics_outputs() -> None:
@@ -50,6 +52,7 @@ def test_schema_lock_for_analytics_outputs() -> None:
         "evidence",
         "exercise_summaries",
         "heuristic",
+        "leg_stress",
         "missing_metrics",
         "movement_patterns",
         "primary_session_tag",
@@ -67,5 +70,36 @@ def test_schema_lock_for_analytics_outputs() -> None:
         "date",
         "missing_metrics",
         "strength",
+        "wellness",
+    ]
+
+
+def test_schema_lock_for_context_outputs() -> None:
+    cycling = build_cycling_context(
+        [
+            {
+                "id": "a1",
+                "type": "Ride",
+                "start_date_local": "2026-01-01T10:00:00",
+                "moving_time": 1800,
+                "icu_training_load": 10,
+            }
+        ]
+    )
+    combined = build_combined_training_context(lifting_context={"number_of_workouts": 0}, cycling_context=cycling)
+
+    assert "co_occurrences" in cycling
+    assert "co_occurrences" in combined
+    assert "series" in cycling["sprint_power"]
+    assert "trend" not in cycling["sprint_power"]
+    assert sorted(combined.keys()) == [
+        "co_occurrences",
+        "constraints",
+        "cross_training_flags",
+        "cycling",
+        "lifting",
+        "metadata",
+        "missing_sources",
+        "recommendations_ready",
         "wellness",
     ]

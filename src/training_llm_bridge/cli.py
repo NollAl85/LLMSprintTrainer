@@ -15,7 +15,10 @@ from training_llm_bridge.analytics.cycling_efforts import (
     build_power_baselines,
     classify_cycling_activity,
 )
-from training_llm_bridge.analytics.exposure_calendar import build_daily_exposure_calendar
+from training_llm_bridge.analytics.exposure_calendar import (
+    build_daily_exposure_calendar,
+    build_weekly_exposure_summary,
+)
 from training_llm_bridge.analytics.strength_classification import classify_strength_workout
 from training_llm_bridge.coach.sprint_constraints import get_sprint_kilo_constraints
 from training_llm_bridge.config import load_settings
@@ -182,6 +185,7 @@ def _cmd_analytics_calendar(args: argparse.Namespace) -> dict:
         baselines=baselines,
         wellness=wellness,
     )
+    weekly_summary = build_weekly_exposure_summary(calendar)
 
     result = {
         "calendar": calendar,
@@ -195,6 +199,7 @@ def _cmd_analytics_calendar(args: argparse.Namespace) -> dict:
                 "Rows are emitted only for dates present in cycling, strength, or wellness inputs.",
             ],
         },
+        "weekly_summary": weekly_summary,
     }
 
     if args.out_json:

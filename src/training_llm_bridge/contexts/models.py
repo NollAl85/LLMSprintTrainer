@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ExerciseSet(BaseModel):
@@ -71,6 +71,7 @@ class CyclingContext(BaseModel):
     date_range: dict[str, str | None] = {}
     number_of_cycling_activities: int = 0
     missing_metrics: list[str] = []
+    co_occurrences: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CombinedTrainingContext(BaseModel):
@@ -81,6 +82,7 @@ class CombinedTrainingContext(BaseModel):
     wellness: dict[str, Any] | None = None
     constraints: dict[str, Any]
     cross_training_flags: list[dict[str, Any]] = []
+    co_occurrences: list[dict[str, Any]] = Field(default_factory=list)
     recommendations_ready: bool = True
     missing_sources: list[str] = []
     metadata: dict[str, Any] = {}

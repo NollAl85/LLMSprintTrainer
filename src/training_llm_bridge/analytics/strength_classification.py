@@ -43,6 +43,9 @@ class StrengthClassificationConfig:
     accessory_max_weight_kg: float = 30.0
     lower_body_set_share: float = 0.50
     upper_body_set_share: float = 0.50
+    leg_stress_low_sets: int = 1
+    leg_stress_moderate_sets: int = 4
+    leg_stress_high_sets: int = 8
 
     @classmethod
     def from_yaml(cls) -> "StrengthClassificationConfig":
@@ -63,6 +66,7 @@ def classify_strength_workout(
         config = StrengthClassificationConfig.from_yaml()
 
     movement_map = _load_movement_patterns()
+    leg_stress_map = _load_leg_stress_patterns()
     normalized = workout.get("workout", workout)
     exercises = normalized.get("exercises") or []
     movement_patterns = _empty_movement_patterns()
@@ -123,6 +127,7 @@ def classify_strength_workout(
 
     if known_rpe == 0:
         uncertainty.append("RPE/RIR/e1RM mostly unavailable; session tags use rep-range heuristics.")
+    leg_stress = _leg_stress_summary(movement_patterns, leg_stress_map, config)
 
     session_tags = _session_tags(
         movement_patterns,
@@ -148,6 +153,7 @@ def classify_strength_workout(
         },
         "exercise_summaries": exercise_summaries,
         "heuristic": True,
+        "leg_stress": leg_stress,
         "missing_metrics": _missing_metrics(normalized, known_rpe),
         "movement_patterns": _clean_movement_patterns(movement_patterns),
         "primary_session_tag": primary_tag,
@@ -170,6 +176,15 @@ def _load_movement_patterns() -> dict[str, list[str]]:
     }
 
 
+def _load_leg_stress_patterns() -> dict[str, list[str]]:
+    data = load_analytics_config("leg_stress_patterns.yaml")
+    return {
+        group: [str(item) for item in values]
+        for group, values in data.items()
+        if isinstance(values, list)
+    }
+
+
 def _empty_movement_patterns() -> dict[str, dict[str, Any]]:
     return {pattern: {"sets": 0, "volume_kg": 0.0, "exercises": []} for pattern in MOVEMENT_PATTERNS}
 
@@ -184,6 +199,51 @@ def _match_movement_pattern(title: str, movement_map: dict[str, list[str]]) -> s
     if not matches:
         return "unknown"
     return sorted(matches, reverse=True)[0][1]
+
+
+def _leg_stress_summary(
+    movement_patterns: dict[str, dict[str, Any]],
+    leg_stress_map: dict[str, list[str]],
+    config: StrengthClassificationConfig,
+) -> dict[str, Any]:
+    groups: dict[str, dict[str, Any]] = {}
+    for group in ("quads", "posterior_chain"):
+        patterns = leg_stress_map.get(group, [])
+        sets = sum(int(movement_patterns.get(pattern, {}).get("sets") or 0) for pattern in patterns)
+        volume = sum(float(movement_patterns.get(pattern, {}).get("volume_kg") or 0) for pattern in patterns)
+        exercises: list[str] = []
+        for pattern in patterns:
+            exercises.extend(movement_patterns.get(pattern, {}).get("exercises") or [])
+        groups[group] = {
+            "exercises": sorted(set(exercises)),
+            "movement_patterns": patterns,
+            "sets": sets,
+            "stress": _leg_stress_label(sets, config),
+            "volume_kg": round(volume, 2),
+        }
+
+    total_sets = sum(group["sets"] for group in groups.values())
+    total_volume = sum(group["volume_kg"] for group in groups.values())
+    return {
+        "basis": "movement-pattern set counts and tracked load; practical heuristic, not a physiology score",
+        "heuristic": True,
+        "overall": {
+            "sets": total_sets,
+            "stress": _leg_stress_label(total_sets, config),
+            "volume_kg": round(total_volume, 2),
+        },
+        **groups,
+    }
+
+
+def _leg_stress_label(sets: int, config: StrengthClassificationConfig) -> str:
+    if sets >= config.leg_stress_high_sets:
+        return "high"
+    if sets >= config.leg_stress_moderate_sets:
+        return "moderate"
+    if sets >= config.leg_stress_low_sets:
+        return "low"
+    return "none"
 
 
 def _session_tags(

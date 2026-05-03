@@ -34,8 +34,8 @@ WORKOUTS = [
                 "title": "Squat (Barbell)",
                 "exercise_template_id": "D04AC939",
                 "sets": [
-                    {"type": "normal", "weight_kg": 110, "reps": 5},
-                    {"type": "normal", "weight_kg": 112.5, "reps": 3},
+                    {"type": "normal", "weight_kg": 110, "reps": 5, "rpe": 8},
+                    {"type": "normal", "weight_kg": 112.5, "reps": 3, "rpe": 9},
                 ],
             }
         ],
@@ -53,7 +53,9 @@ def test_lifting_context_computes_volume_and_progression() -> None:
     assert context["sets_per_exercise"]["Squat (Barbell)"] == 4
     assert context["volume_per_exercise_kg"]["Squat (Barbell)"] == 1702.5
     assert context["estimated_1rm_kg"]["Squat (Barbell)"]["estimated_1rm_kg"] == 128.33
-    assert context["recent_progression_major_lifts"]["Squat (Barbell)"]["direction"] == "up"
+    assert "direction" not in context["recent_progression_major_lifts"]["Squat (Barbell)"]
+    assert context["recent_progression_major_lifts"]["Squat (Barbell)"]["delta_kg"] == 11.67
+    assert context["lower_body_sprint_interference_flags"][-1]["set_rpe_mean"] == 8.5
     assert context["lower_body_sprint_interference_flags"]
 
 
