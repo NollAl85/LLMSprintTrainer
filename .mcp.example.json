@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "training-llm-bridge": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/absolute/path/to/training-llm-bridge",
+        "run",
+        "training-bridge-mcp"
+      ],
+      "env": {
+        "HEVY_API_KEY": "your_hevy_api_key",
+        "HEVY_API_BASE_URL": "https://api.hevyapp.com",
+        "HEVY_WRITE_ENABLED": "false",
+        "INTERVALS_API_KEY": "your_intervals_api_key",
+        "INTERVALS_ATHLETE_ID": "your_athlete_id",
+        "INTERVALS_API_BASE_URL": "https://intervals.icu/api/v1"
+      }
+    }
+  }
+}
